@@ -9,7 +9,7 @@
  */
 
 
-//#define DEBUGGING 1
+#define DEBUGGING 3
 
 
 #include <stdint.h>
@@ -20,6 +20,7 @@
 
 #if defined(DEBUGGING)
 #include <stdio.h>
+#include <stdlib.h>
 #endif
 
 // RANDOM
@@ -48,6 +49,19 @@ pcg32_random_float_01(Random *rng){
 }
 
 // HARD CODED TEST CASE
+
+uint32_t test_base_image[10][10] = {
+    1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 
+    1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 
+    1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 
+    1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 
+    1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 
+    1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 
+    1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 
+};
 
 uint32_t test_samples[][2][2] = {
     {{0, 1}, {1, 0}},
@@ -130,294 +144,6 @@ int32_t occurences[] = {
     // STATUE
     1,1,1,1,
 };
-
-#if 0
-uint32_t test_samples[][3][3] = {
-    // OPEN SPACE
-    {
-        {0,0,0},
-        {0,0,0},
-        {0,0,0},
-    },
-    
-    // ROWS
-    {
-        {1,1,1},
-        {0,0,0},
-        {0,0,0},
-    },
-    
-    {
-        {0,0,0},
-        {1,1,1},
-        {0,0,0},
-    },
-    
-    {
-        {0,0,0},
-        {0,0,0},
-        {1,1,1},
-    },
-    
-    {
-        {1,1,1},
-        {0,0,0},
-        {1,1,1},
-    },
-    
-    // COLUMNS
-    {
-        {1,0,0},
-        {1,0,0},
-        {1,0,0},
-    },
-    
-    {
-        {0,1,0},
-        {0,1,0},
-        {0,1,0},
-    },
-    
-    {
-        {0,0,1},
-        {0,0,1},
-        {0,0,1},
-    },
-    
-    {
-        {1,0,1},
-        {1,0,1},
-        {1,0,1},
-    },
-    
-    // BENDS
-    {
-        {1,1,1},
-        {0,0,1},
-        {0,0,1},
-    },
-    
-    {
-        {0,0,1},
-        {0,0,1},
-        {1,1,1},
-    },
-    
-    {
-        {1,0,0},
-        {1,0,0},
-        {1,1,1},
-    },
-    
-    {
-        {1,1,1},
-        {1,0,0},
-        {1,0,0},
-    },
-    
-    {
-        {0,0,0},
-        {1,1,1},
-        {0,0,1},
-    },
-    
-    {
-        {0,0,1},
-        {1,1,1},
-        {0,0,0},
-    },
-    
-    {
-        {1,0,0},
-        {1,1,1},
-        {0,0,0},
-    },
-    
-    {
-        {0,0,0},
-        {1,1,1},
-        {1,0,0},
-    },
-    
-    {
-        {1,1,0},
-        {0,1,0},
-        {0,1,0},
-    },
-    
-    {
-        {0,1,0},
-        {0,1,0},
-        {1,1,0},
-    },
-    
-    {
-        {0,1,0},
-        {0,1,0},
-        {0,1,1},
-    },
-    
-    {
-        {0,1,1},
-        {0,1,0},
-        {0,1,0},
-    },
-    
-    {
-        {0,0,0},
-        {1,1,0},
-        {0,1,0},
-    },
-    
-    {
-        {0,1,0},
-        {1,1,0},
-        {0,0,0},
-    },
-    
-    {
-        {0,1,0},
-        {0,1,1},
-        {0,0,0},
-    },
-    
-    {
-        {0,0,0},
-        {0,1,1},
-        {0,1,0},
-    },
-    
-    {
-        {1,1,1},
-        {0,0,1},
-        {1,0,1},
-    },
-    
-    {
-        {1,0,1},
-        {0,0,1},
-        {1,1,1},
-    },
-    
-    {
-        {1,0,1},
-        {1,0,0},
-        {1,1,1},
-    },
-    
-    {
-        {1,1,1},
-        {1,0,0},
-        {1,0,1},
-    },
-    
-    // CORNERS
-    {
-        {0,0,0},
-        {0,0,0},
-        {1,0,0},
-    },
-    
-    {
-        {0,0,0},
-        {0,0,0},
-        {0,0,1},
-    },
-    
-    {
-        {0,0,1},
-        {0,0,0},
-        {0,0,0},
-    },
-    
-    {
-        {1,0,0},
-        {0,0,0},
-        {0,0,0},
-    },
-    
-    // Ts
-    {
-        {0,0,1},
-        {1,1,1},
-        {0,0,1},
-    },
-    
-    {
-        {1,0,0},
-        {1,1,1},
-        {1,0,0},
-    },
-    
-    {
-        {1,1,1},
-        {0,1,0},
-        {0,1,0},
-    },
-    
-    {
-        {0,1,0},
-        {0,1,0},
-        {1,1,1},
-    },
-    
-    {
-        {0,0,0},
-        {1,1,1},
-        {0,1,0},
-    },
-    
-    {
-        {0,1,0},
-        {1,1,0},
-        {0,1,0},
-    },
-    
-    {
-        {0,1,0},
-        {1,1,1},
-        {0,0,0},
-    },
-    
-    {
-        {0,0,0},
-        {1,1,1},
-        {0,1,0},
-    },
-    
-    {
-        {0,1,0},
-        {1,1,1},
-        {0,1,0},
-    },
-};
-
-int32_t occurences[] = {
-    // OPEN SPACE
-    1,
-    
-    // ROWS
-    1,1,1,1,
-    
-    // COLUMNS
-    1,1,1,1,
-    
-    // BENDS
-    1,1,1,1,
-    1,1,1,1,
-    1,1,1,1,
-    1,1,1,1,
-    1,1,1,1,
-    
-    // CORNERS
-    1,1,1,1,
-    
-    // Ts
-    1,1,1,1,
-    1,1,1,1,
-    1,
-};
-#endif
 
 // MEMORY
 typedef struct Partition{
@@ -687,6 +413,7 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
             goto finished;
         }
         
+        // randomly choose a value for the cell with lowest entropy
         cell_finished[(best_x + best_y*w)] = 1;
         
         uint8_t *cell_coefficients = &coefficients[(best_x + best_y*w) * sample_count];
@@ -839,7 +566,7 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
         
         change_count = 0;
         
-#if defined(DEBUGGING)
+#if defined(DEBUGGING) && (DEBUGGING == 1)
         for (uint32_t y = 0; y < h; ++y){
             for (uint32_t x = 0; x < w; ++x){
                 if (cell_finished[x + y*w]){
@@ -857,6 +584,48 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
             printf("\n");
         }
         printf("\n");
+#endif
+        
+#if defined(DEBUGGING) && (DEBUGGING == 3)
+        {
+            uint32_t *map = (uint32_t*)malloc(4*w*h);
+            memset(map, 0xFF, 4*w*h);
+        for (uint32_t y = 0; y < h; ++y){
+            for (uint32_t x = 0; x < w; ++x){
+                if (cell_finished[x + y*w]){
+                    uint8_t *cell = &coefficients[(x + y*w)*sample_count];
+                    uint32_t t = 0;
+                    for (; t < sample_count; ++t){
+                        if (cell[t]) break;
+                    }
+                    
+                    uint32_t *sample = samples->samples[t].data;
+                    for (uint32_t yy = 0; yy < samples->h; ++yy){
+                        for (uint32_t xx = 0; xx < samples->w; ++xx){
+                            uint32_t xx_x = (xx + x) % w;
+                            uint32_t yy_y = (yy + y) % h;
+                            map[xx_x + yy_y*w] = sample[xx + yy*samples->w];
+                        }
+                    }
+                }
+            }
+        }
+        
+        for (uint32_t y = 0; y < h; ++y){
+            for (uint32_t x = 0; x < w; ++x){
+                uint32_t v = map[x + y*w];
+                if (v == 0xFFFFFFFF){
+                    printf("?");
+                }
+                else{
+                    printf("%u", v);
+                }
+            }
+            printf("\n");
+        }
+        printf("\n");
+        free(map);
+    }
 #endif
     }
     
@@ -880,13 +649,191 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
     return(result);
 }
 
+// SET SAMPLE FROM INPUT IMAGE
+typedef struct Wave2D_Image_Processing_Params{
+    uint32_t w;
+    uint32_t h;
+    uint32_t window_w;
+    uint32_t window_h;
+    
+    uint32_t sample_x_positions;
+    uint32_t sample_y_positions;
+    uint32_t max_sample_count;
+    uint32_t scratch_size;
+    
+    uint32_t next_sample_stride;
+    
+    uint32_t wrapped_image_w;
+    uint32_t wrapped_image_h;
+    uint32_t wrapped_image_size;
+} Wave2D_Image_Processing_Params;
+
+static Wave2D_Image_Processing_Params
+wave2d_image_processing_params_unwrapped(uint32_t w, uint32_t h, uint32_t window_w, uint32_t window_h){
+    Wave2D_Image_Processing_Params params;
+    params.w = w;
+    params.h = h;
+    params.window_w = window_w;
+    params.window_h = window_h;
+    
+    params.sample_x_positions = params.w - params.window_w + 1;
+    params.sample_y_positions = params.h - params.window_h + 1;
+    params.max_sample_count = params.sample_x_positions*params.sample_y_positions;
+    params.scratch_size = params.max_sample_count*(params.w*params.h*4 + 1);
+    
+    params.next_sample_stride = params.window_w*params.window_h;
+    params.wrapped_image_w = 0;
+    params.wrapped_image_h = 0;
+    params.wrapped_image_size = 0;
+    
+    return(params);
+}
+
+static Wave2D_Image_Processing_Params
+wave2d_image_processing_params_wrapped(uint32_t w, uint32_t h, uint32_t window_w, uint32_t window_h){
+    Wave2D_Image_Processing_Params params;
+    params.w = w;
+    params.h = h;
+    params.window_w = window_w;
+    params.window_h = window_h;
+    
+    params.sample_x_positions = params.w;
+    params.sample_y_positions = params.h;
+    params.max_sample_count = params.sample_x_positions*params.sample_y_positions;
+    
+    params.wrapped_image_w = w + window_w - 1;
+    params.wrapped_image_h = h + window_h - 1;
+    params.wrapped_image_size = params.wrapped_image_w*params.wrapped_image_h;
+    
+    params.scratch_size = params.max_sample_count*(params.w*params.h*4 + 1) + 4*(params.wrapped_image_size);
+    
+    params.next_sample_stride = params.window_w*params.window_h;
+    
+    return(params);
+}
+
+static uint32_t*
+wave2d_get_processed_samples_from_scratch(Wave2D_Image_Processing_Params params, void *scratch_memory){
+    uint32_t *result = (uint32_t*)(scratch_memory);
+    return(result);
+}
+
+static uint8_t*
+wave2d_processed_counts_from_scratch(Wave2D_Image_Processing_Params params, void *scratch_memory){
+    uint32_t *sample_memory = (uint32_t*)scratch_memory;
+    uint32_t *wrapped_image = (uint32_t*)(sample_memory + params.max_sample_count*params.next_sample_stride);
+    uint8_t *result = (uint8_t*)(wrapped_image + params.wrapped_image_size);
+    return(result);
+}
+
+static uint32_t
+wave2d_extract_samples_from_image(Wave2D_Image_Processing_Params params, uint32_t *image, void *scratch_memory){
+    uint32_t *sample_memory = (uint32_t*)scratch_memory;
+    uint32_t *wrapped_image = (uint32_t*)(sample_memory + params.max_sample_count*params.next_sample_stride);
+    uint8_t *use_count = (uint8_t*)(wrapped_image + params.wrapped_image_size);
+    
+    uint32_t image_stride = params.w;
+    if (params.wrapped_image_size > 0){
+        uint32_t i = 0;
+        for (uint32_t y = 0; y < params.wrapped_image_h; ++y){
+            for (uint32_t x = 0; x < params.wrapped_image_w; ++x){
+                uint32_t yy = y % params.h;
+                uint32_t xx = x % params.w;
+                wrapped_image[i] = image[xx + yy*params.w];
+                ++i;
+            }
+        }
+        image = wrapped_image;
+        image_stride = params.wrapped_image_w;
+    }
+    
+    uint32_t *current_sample = sample_memory;
+    uint8_t *current_count = use_count;
+    for (uint32_t y = 0; y < params.sample_y_positions; ++y){
+    for (uint32_t x = 0; x < params.sample_x_positions; ++x){
+        
+        uint32_t *src_line = image + (x + y*image_stride);
+        uint32_t *dst_line = current_sample;
+        for (uint32_t yy = 0; yy < params.window_h; ++yy){
+            uint32_t *src = src_line;
+            uint32_t *dst = dst_line;
+            for (uint32_t xx = 0; xx < params.window_w; ++xx){
+                *dst = *src;
+                ++dst;
+                ++src;
+            }
+            src_line += image_stride;
+            dst_line += params.window_w;
+        }
+        
+        int32_t is_repeat_pattern = 0;
+        uint32_t repeat_index = 0;
+        
+        for (uint32_t *prev_sample = sample_memory;
+             prev_sample < current_sample;
+             prev_sample += params.next_sample_stride, ++repeat_index){
+            
+            is_repeat_pattern = 1;
+            uint32_t *a_ptr = prev_sample;
+            uint32_t *b_ptr = current_sample;
+            for (uint32_t i = 0; i < params.next_sample_stride; ++i){
+                if ((*a_ptr) != (*b_ptr)){
+                    is_repeat_pattern = 0;
+                    break;
+                }
+                ++a_ptr;
+                ++b_ptr;
+            }
+            
+            if (is_repeat_pattern){
+                break;
+            }
+        }
+        
+        if (is_repeat_pattern){
+            ++use_count[repeat_index];
+        }
+        else{
+        *current_count = 1;
+        current_sample += params.next_sample_stride;
+        ++current_count;
+        }
+    }
+}
+
+uint32_t total_count = (uint32_t)(current_count - use_count);
+return(total_count);
+}
+
+#if defined(DEBUGGING)
+static void
+wave2d_print_samples(Wave2D_Samples samples){
+    Wave2D_Sample *sample_ptr = samples.samples;
+    Wave2D_Sample *end_ptr = samples.samples + samples.sample_count;
+    
+    for (; sample_ptr < end_ptr; ++sample_ptr){
+        printf("weight %f:\n", sample_ptr->weight);
+        uint32_t i = 0;
+        for (uint32_t y = 0; y < samples.h; ++y){
+            for (uint32_t x = 0; x < samples.w; ++x){
+                printf("%u", sample_ptr->data[i]);
+                ++i;
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 int main(int argc, char **argv){
-    
     // SETUP SAMPLES
     Wave2D_Samples samples = {0};
     
+    // direct sample setup
+#if 0
     int32_t sample_memory_size = (1 << 10)*64;
     void *sample_memory = malloc(sample_memory_size);
     
@@ -897,6 +844,30 @@ int main(int argc, char **argv){
         wave2d_add_sample(&samples, &(test_samples[i][0][0]), (float)occurences[i]);
     }
     wave2d_end_samples(&samples);
+#endif
+    
+    // sample setup from image
+    Wave2D_Image_Processing_Params img_proc_params = wave2d_image_processing_params_wrapped(10, 10, 3, 3);
+    void *img_proc_scratch_memory = malloc(img_proc_params.scratch_size);
+    int32_t sample_count = wave2d_extract_samples_from_image(img_proc_params, &test_base_image[0][0], img_proc_scratch_memory);
+    
+    uint32_t *current_sample = wave2d_get_processed_samples_from_scratch(img_proc_params, img_proc_scratch_memory);
+    uint8_t *current_count = wave2d_processed_counts_from_scratch(img_proc_params, img_proc_scratch_memory);
+    
+    int32_t sample_memory_size = sample_count*sizeof(Wave2D_Sample);
+    void *sample_memory = malloc(sample_memory_size);
+    wave2d_samples_memory(&samples, sample_memory, sample_memory_size);
+    wave2d_begin_samples(&samples, 3, 3);
+    for (int32_t i = 0; i < sample_count; ++i){
+        wave2d_add_sample(&samples, current_sample, (float)(*current_count));
+        current_sample += img_proc_params.next_sample_stride;
+        ++current_count;
+    }
+    wave2d_end_samples(&samples);
+    
+#if defined(DEBUGGING) && (DEBUGGING == 2)
+    wave2d_print_samples(samples);
+    #endif
     
     // RUN THE WAVE COLLAPSE
     Wave2D_State state = {0};
@@ -915,7 +886,7 @@ int main(int argc, char **argv){
     Random rng = {0};
     rng.inc = 17;
     
-    for (int32_t i = 0; i < 10; ++i){
+    for (int32_t i = 0; i < 1; ++i){
         rng.state = 12 + i;
         
         int32_t result = wave2d_generate_output(&state, &samples, &rng, out, scratch_memory, scratch_memory_size);
