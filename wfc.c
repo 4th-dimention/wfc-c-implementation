@@ -54,17 +54,17 @@ pcg32_random_float_01(Random *rng){
 #define SRC_IMG_H 11
 
 uint32_t test_base_image[SRC_IMG_W][SRC_IMG_H] = {
-    0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1,
-    0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1,
-    0, 0, 2, 0, 0, 0, 1, 4, 1, 1, 1,
-    0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1,
     0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1,
     1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1,
     1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1,
-    1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 3,
-    1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1,
-    1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1,
+    1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+    1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1,
 };
 
 // MEMORY
@@ -153,13 +153,16 @@ wave2d_end_samples(Wave2D_Samples *samples){}
 typedef struct Wave2D_State{
     Partition part;
     
-    uint32_t w, h;
+    uint32_t output_w, output_h;
     uint32_t sample_count;
     uint32_t coefficient_count;
     uint8_t *coefficients;
     
     float log_T;
     float *weight_by_log_weight;
+    
+    Wave2D_Samples **sample_arrays;
+    uint32_t sample_array_count;
 } Wave2D_State;
 
 static void
@@ -168,15 +171,22 @@ wave2d_state_memory(Wave2D_State *state, void *memory, int32_t size){
 }
 
 static void
-wave2d_set_output_size(Wave2D_State *state, Wave2D_Samples *samples, uint32_t w, uint32_t h){
-    uint32_t grid_cell_count = w*h;
-    uint32_t sample_count = samples->sample_count;
+wave2d_initialize_state(Wave2D_State *state, Wave2D_Samples **sample_arrays, uint32_t sample_array_count, uint32_t output_w, uint32_t output_h){
+    uint32_t grid_cell_count = output_w*output_h;
+    
+    uint32_t sample_count = 0;
+    for (uint32_t i = 0; i < sample_array_count; ++i){
+        sample_count += sample_arrays[i]->sample_count;
+    }
+    
     uint32_t coefficient_count = grid_cell_count * sample_count;
     
-    state->w = w;
-    state->h = h;
+    state->output_w = output_w;
+    state->output_h = output_h;
     state->sample_count = sample_count;
     state->coefficient_count = coefficient_count;
+    state->sample_arrays = sample_arrays;
+    state->sample_array_count = sample_array_count;
     
     part_clear(&state->part);
     state->coefficients = push_array(&state->part, uint8_t, coefficient_count);
@@ -185,14 +195,18 @@ wave2d_set_output_size(Wave2D_State *state, Wave2D_Samples *samples, uint32_t w,
     state->weight_by_log_weight = push_array(&state->part, float, sample_count);
     
     float *weight_by_log_weight = state->weight_by_log_weight;
-    float *weight_ptr = &samples->samples[0].weight;
-    int32_t stride = sizeof(samples->samples[0]);
-    for (uint32_t i = 0; i < sample_count; ++i){
-        weight_by_log_weight[i] = (*weight_ptr) * logf(*weight_ptr);
-        weight_ptr = (float*)((uint8_t*)weight_ptr + stride);
+    int32_t stride = sizeof(Wave2D_Sample);
+    
+    for (uint32_t i = 0; i < sample_array_count; ++i){
+        float *weight_ptr = &sample_arrays[i]->samples[0].weight;
+        uint32_t local_sample_count = sample_arrays[i]->sample_count;
+        for (uint32_t j = 0; j < local_sample_count; ++j){
+            *weight_by_log_weight = (*weight_ptr) * logf(*weight_ptr);
+            ++weight_by_log_weight;
+            weight_ptr = (float*)((uint8_t*)weight_ptr + stride);
+        }
     }
 }
-
 typedef struct Wave2D_Change{
     uint32_t x, y;
 } Wave2D_Change;
@@ -266,21 +280,23 @@ wave2d_get_debug_output(uint32_t *map, uint32_t w, uint32_t h, uint8_t *cell_fin
 #endif
 
 static int32_t
-wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng, uint32_t *out, void *scratch, int32_t scratch_size){
+wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *scratch, int32_t scratch_size){
     int32_t result = 0;
     
     uint32_t coefficient_count = state->coefficient_count;
     
-    uint32_t w = state->w;
-    uint32_t h = state->h;
-    uint32_t cell_count = w*h;
+    uint32_t output_w = state->output_w;
+    uint32_t output_h = state->output_h;
+    uint32_t cell_count = output_w*output_h;
     uint32_t sample_count = state->sample_count;
+    
+    // TODO(allen): Generalize this procedure to multiple sample arrays
+    Wave2D_Samples *samples = state->sample_arrays[0];
     
     uint32_t sample_w = samples->w;
     uint32_t sample_h = samples->h;
     
     uint8_t *coefficients = state->coefficients;
-    Wave2D_Sample *sample_array = samples->samples;
     float *weight_by_log_weight = state->weight_by_log_weight;
     
     uint8_t *scratch_start = scratch;
@@ -315,23 +331,23 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
         // OBSERVE
         //  find smallest entropy
         
-        uint32_t best_x = w;
-        uint32_t best_y = h;
+        uint32_t best_x = output_w;
+        uint32_t best_y = output_h;
         float best_total_weight = 0;
         float min_entropy = 100000.f;
         
-        for (uint32_t x = 0; x < w; ++x){
-            for (uint32_t y = 0; y < h; ++y){
+        for (uint32_t x = 0; x < output_w; ++x){
+            for (uint32_t y = 0; y < output_h; ++y){
                 
-                if (!cell_finished[(x + y*w)]){
-                    uint8_t *cell_coefficients = &coefficients[(x + y*w) * sample_count];
+                if (!cell_finished[(x + y*output_w)]){
+                    uint8_t *cell_coefficients = &coefficients[(x + y*output_w) * sample_count];
                     
                     uint32_t valid_sample_count = 0;
                     float total_weight = 0.f;
                     float entropy = 0;
                     
-                    float *weight_ptr = &sample_array[0].weight;
-                    int32_t stride = sizeof(sample_array[0]);
+                    float *weight_ptr = &samples->samples[0].weight;
+                    int32_t stride = sizeof(Wave2D_Sample);
                     for (uint32_t t = 0; t < sample_count; ++t){
                         if (cell_coefficients[t]){
                             ++valid_sample_count;
@@ -378,19 +394,19 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
             }
         }
         
-        if (best_x == w && best_y == h){
+        if (best_x == output_w && best_y == output_h){
             goto finished;
         }
         
         // randomly choose a value for the cell with lowest entropy
-        cell_finished[(best_x + best_y*w)] = 1;
+        cell_finished[(best_x + best_y*output_w)] = 1;
         
-        uint8_t *cell_coefficients = &coefficients[(best_x + best_y*w) * sample_count];
+        uint8_t *cell_coefficients = &coefficients[(best_x + best_y*output_w) * sample_count];
         
         float die_roll = best_total_weight * pcg32_random_float_01(rng);
         
-        float *weight_ptr = &sample_array[0].weight;
-        int32_t stride = sizeof(sample_array[0]);
+        float *weight_ptr = &samples->samples[0].weight;
+        int32_t stride = sizeof(Wave2D_Sample);
         uint32_t hit_element = sample_count;
         for (uint32_t t = 0; t < sample_count; ++t){
             die_roll -= (*weight_ptr)*cell_coefficients[t];
@@ -416,7 +432,7 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
             Wave2D_Change new_change;
             new_change.x = best_x;
             new_change.y = best_y;
-            int32_t added_change = wave2d_add_change(new_change, changes, &change_count, change_max, on_change_queue, w);
+            int32_t added_change = wave2d_add_change(new_change, changes, &change_count, change_max, on_change_queue, output_w);
             
             if (added_change != AddChange_Success){
                 failed = 1;
@@ -433,12 +449,12 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
             
             for (delta_x = -(int32_t)(sample_w) + 1; delta_x < (int32_t)(sample_w); ++delta_x){
                 for (delta_y = -(int32_t)(sample_h) + 1; delta_y < (int32_t)(sample_h); ++delta_y){
-                    uint32_t x2 = (uint32_t)((change.x + delta_x + w) % w);
-                    uint32_t y2 = (uint32_t)((change.y + delta_y + h) % h);
+                    uint32_t x2 = (uint32_t)((change.x + delta_x + output_w) % output_w);
+                    uint32_t y2 = (uint32_t)((change.y + delta_y + output_h) % output_h);
                     
                     // cell1 changed, now propogate to cell2
-                    uint8_t *cell1 = &coefficients[(change.x + change.y*w)*sample_count];
-                    uint8_t *cell2 = &coefficients[(x2 + y2*w)*sample_count];
+                    uint8_t *cell1 = &coefficients[(change.x + change.y*output_w)*sample_count];
+                    uint8_t *cell2 = &coefficients[(x2 + y2*output_w)*sample_count];
                     
                     uint32_t cell_2_changed = 0;
                     
@@ -461,13 +477,15 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
                         maxy = delta_y + (int32_t)sample_h;
                     }
                     
-                    uint8_t cell2_is_finished = cell_finished[x2 + y2*w];
+                    uint8_t cell2_is_finished = cell_finished[x2 + y2*output_w];
                     int32_t potential_state_count = 0;
                     
                     for (uint32_t t2 = 0; t2 < sample_count; ++t2){
+                        // TODO(allen): keep a list of uneliminated sample values for each cell
                         if (cell2[t2]){
                             uint32_t can_coexist = 0;
                             for (uint32_t t1 = 0; t1 < sample_count; ++t1){
+                                // TODO(allen): keep a list of uneliminated sample values for each cell
                                 if (cell1[t1]){
                                     uint32_t coexist_check_result = 1;
                                     
@@ -477,7 +495,7 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
                                     
                                     for (int32_t sx = minx; sx < maxx; ++sx){
                                         for (int32_t sy = miny; sy < maxy; ++sy){
-                                            if (sample_1[sx + sy*sample_w] != sample_2[(sx-delta_x) + (sy-delta_y)*sample_h]){
+                                            if (sample_1[sx + sy*sample_w] != sample_2[(sx-delta_x) + (sy-delta_y)*sample_w]){
                                                 coexist_check_result = 0;
                                                 goto finish_coexist_check;
                                             }
@@ -512,7 +530,7 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
                     }
                     
                     if (!cell2_is_finished && potential_state_count == 1){
-                        cell_finished[x2 + y2*w] = 1;
+                        cell_finished[x2 + y2*output_w] = 1;
                     }
                     
                     if (cell_2_changed){
@@ -527,7 +545,7 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
                         new_change.x = x2;
                         new_change.y = y2;
                         
-                        int32_t added_change = wave2d_add_change(new_change, changes, &change_count, change_max, on_change_queue, w);
+                        int32_t added_change = wave2d_add_change(new_change, changes, &change_count, change_max, on_change_queue, output_w);
                         if (added_change == AddChange_Failed){
                             failed = 1;
                             fail_info.type = Fail_ChangeQueueOutOfMemory;
@@ -537,16 +555,16 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
                 }
             }
             
-            on_change_queue[change.x + change.y*w] = 0;
+            on_change_queue[change.x + change.y*output_w] = 0;
         }
         
         change_count = 0;
         
 #if defined(DEBUGGING) && (DEBUGGING == 1)
-        for (uint32_t y = 0; y < h; ++y){
-            for (uint32_t x = 0; x < w; ++x){
-                if (cell_finished[x + y*w]){
-                    uint8_t *cell = &coefficients[(x + y*w)*sample_count];
+        for (uint32_t y = 0; y < output_h; ++y){
+            for (uint32_t x = 0; x < output_w; ++x){
+                if (cell_finished[x + y*output_w]){
+                    uint8_t *cell = &coefficients[(x + y*output_w)*sample_count];
                     uint32_t t = 0;
                     for (; t < sample_count; ++t){
                         if (cell[t]) break;
@@ -564,12 +582,12 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
         
 #if defined(DEBUGGING) && (DEBUGGING == 3)
         {
-            uint32_t *map = (uint32_t*)malloc(4*w*h);
-            wave2d_get_debug_output(map, w, h, cell_finished, coefficients, sample_count, samples);
+            uint32_t *map = (uint32_t*)malloc(4*output_w*output_h);
+            wave2d_get_debug_output(map, output_w, output_h, cell_finished, coefficients, sample_count, samples);
             
-        for (uint32_t y = 0; y < h; ++y){
-            for (uint32_t x = 0; x < w; ++x){
-                uint32_t v = map[x + y*w];
+        for (uint32_t y = 0; y < output_h; ++y){
+            for (uint32_t x = 0; x < output_w; ++x){
+                uint32_t v = map[x + y*output_w];
                 if (v == 0xFFFFFFFF){
                     printf("?");
                 }
@@ -587,16 +605,16 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
     
     finished:;
     if (!failed){
-        for (uint32_t x = 0; x < w; ++x){
-            for (uint32_t y = 0; y < h; ++y){
-                uint8_t *cell = &coefficients[(x + y*w)*sample_count];
+        for (uint32_t x = 0; x < output_w; ++x){
+            for (uint32_t y = 0; y < output_h; ++y){
+                uint8_t *cell = &coefficients[(x + y*output_w)*sample_count];
                 uint32_t t = 0;
                 for (; t < sample_count; ++t){
                     if (cell[t]) break;
                 }
                 
                 uint32_t *sample = samples->samples[t].data;
-                out[x + y*w] = sample[0];
+                out[x + y*output_w] = sample[0];
             }
         }
         result = 1;
@@ -623,24 +641,24 @@ wave2d_generate_output(Wave2D_State *state, Wave2D_Samples *samples, Random *rng
             {
                 printf("Reached a contradictive state at some tile on the board.\n");
                 
-                uint32_t *map = (uint32_t*)malloc(4*w*h);
-                wave2d_get_debug_output(map, w, h, cell_finished, coefficients, sample_count, samples);
+                uint32_t *map = (uint32_t*)malloc(4*output_w*output_h);
+                wave2d_get_debug_output(map, output_w, output_h, cell_finished, coefficients, sample_count, samples);
                 
                 for (uint32_t y = 0; y < sample_h; ++y){
                     for (uint32_t x = 0; x < sample_w; ++x){
                         uint32_t yy = fail_info.contradiction.y + y;
                         uint32_t xx = fail_info.contradiction.x + x;
                         
-                        yy %= h;
-                        xx %= w;
+                        yy %= output_h;
+                        xx %= output_w;
                         
-                        map[xx + yy*w] = 0xEEEEEEEE;
+                        map[xx + yy*output_w] = 0xEEEEEEEE;
                     }
                 }
                 
-                for (uint32_t y = 0; y < h; ++y){
-                    for (uint32_t x = 0; x < w; ++x){
-                        uint32_t v = map[x + y*w];
+                for (uint32_t y = 0; y < output_h; ++y){
+                    for (uint32_t x = 0; x < output_w; ++x){
+                        uint32_t v = map[x + y*output_w];
                         if (v == 0xFFFFFFFF){
                             printf("?");
                         }
@@ -686,12 +704,12 @@ typedef struct Wave2D_Image_Processing_Params{
     uint32_t wrapped_image_h;
     uint32_t wrapped_image_size;
     
-    int32_t apply_rotation;
-    int32_t apply_mirroring;
+    uint32_t apply_rotation;
+    uint32_t apply_mirroring;
 } Wave2D_Image_Processing_Params;
 
 static Wave2D_Image_Processing_Params
-wave2d_image_processing_params(uint32_t w, uint32_t h, uint32_t window_w, uint32_t window_h, int32_t wrapped, int32_t rotate, int32_t mirror){
+wave2d_image_processing_params(uint32_t w, uint32_t h, uint32_t window_w, uint32_t window_h, int32_t wrapped, uint32_t rotation_level, uint32_t mirror_type){
     Wave2D_Image_Processing_Params params;
     params.w = w;
     params.h = h;
@@ -720,15 +738,29 @@ wave2d_image_processing_params(uint32_t w, uint32_t h, uint32_t window_w, uint32
         params.wrapped_image_size = 0;
     }
     
-    if (rotate){
-        params.max_sample_count *= 4;
-    }
-    params.apply_rotation = rotate;
-    
-    if (mirror){
+    if (rotation_level == 1){
         params.max_sample_count *= 2;
+        params.apply_rotation = 1;
     }
-    params.apply_mirroring = mirror;
+    else if (rotation_level == 2){
+        params.max_sample_count *= 4;
+        params.apply_rotation = 2;
+    }
+    else{
+        params.apply_rotation = 0;
+    }
+    
+    if (mirror_type == 1){
+        params.max_sample_count *= 2;
+        params.apply_mirroring = 1;
+    }
+    else if (mirror_type == 2){
+        params.max_sample_count *= 2;
+        params.apply_mirroring = 2;
+    }
+    else{
+        params.apply_mirroring = 0;
+    }
     
     params.scratch_size = params.max_sample_count*(params.w*params.h*4 + 1) + 4*(params.wrapped_image_size);
     
@@ -768,7 +800,7 @@ wave2d_image_to_sample_blit(uint32_t *image, uint32_t image_stride, uint32_t x, 
 
 static void
 wave2d_rotated_sample_to_sample_blit(uint32_t *src_sample, uint32_t rotation, uint32_t *output, uint32_t output_w, uint32_t output_h){
-    switch (rotation){
+    switch (rotation % 4){
         case 0:
         {
             // TODO(allen): this could be memcpy
@@ -836,6 +868,45 @@ wave2d_rotated_sample_to_sample_blit(uint32_t *src_sample, uint32_t rotation, ui
                 }
                 src_line += output_w;
                 ++dst_col;
+            }
+        }break;
+    }
+}
+
+static void
+wave2d_mirrored_sample_to_sample_blit(uint32_t *src_sample, uint32_t vertical_mirror, uint32_t *output, uint32_t output_w, uint32_t output_h){
+    switch (vertical_mirror % 2){
+        case 0:
+        {
+            uint32_t *src_line = src_sample;
+            uint32_t *dst_line = output + output_w - 1;
+            for (uint32_t y = 0; y < output_h; ++y){
+                uint32_t *src = src_line;
+                uint32_t *dst = dst_line;
+                for (uint32_t x = 0; x < output_w; ++x){
+                    *dst = *src;
+                    --dst;
+                    ++src;
+                }
+                src_line += output_w;
+                dst_line += output_w;
+            }
+        }break;
+        
+        case 1:
+        {
+            uint32_t *src_line = src_sample;
+            uint32_t *dst_line = output + (output_h-1)*output_w;
+            for (uint32_t y = 0; y < output_h; ++y){
+                uint32_t *src = src_line;
+                uint32_t *dst = dst_line;
+                for (uint32_t x = 0; x < output_w; ++x){
+                    *dst = *src;
+                    ++dst;
+                    ++src;
+                }
+                src_line += output_w;
+                dst_line -= output_w;
             }
         }break;
     }
@@ -922,7 +993,25 @@ wave2d_extract_samples_from_image(Wave2D_Image_Processing_Params params, uint32_
     // Perform rotations
     if (params.apply_rotation){
     uint32_t total_count = (uint32_t)(current_count - use_count);
-    for (uint32_t rotation = 1; rotation <= 3; ++rotation){
+        
+        uint32_t rot_level_1[1] = {2};
+        uint32_t rot_level_2[3] = {1,2,3};
+        
+        uint32_t *rotation_array = 0;
+        uint32_t rotation_count = 0;
+        
+        if (params.apply_rotation == 1){
+            rotation_array = rot_level_1;
+            rotation_count = ArrayCount(rot_level_1);
+        }
+        else if (params.apply_rotation == 2){
+            rotation_array = rot_level_2;
+            rotation_count = ArrayCount(rot_level_2);
+        }
+        
+        if (rotation_count != 0){
+    for (uint32_t rotation_index = 0; rotation_index < rotation_count; ++rotation_index){
+        uint32_t rotation = rotation_array[rotation_index];
         uint32_t *end_sample = sample_memory + total_count*params.next_sample_stride;
         for (uint32_t *prev_sample = sample_memory;
              prev_sample < end_sample;
@@ -943,7 +1032,32 @@ wave2d_extract_samples_from_image(Wave2D_Image_Processing_Params params, uint32_
     }
 }
 }
+}
     
+// Perform mirroring
+if (params.apply_mirroring){
+    uint32_t total_count = (uint32_t)(current_count - use_count);
+    
+        uint32_t *end_sample = sample_memory + total_count*params.next_sample_stride;
+        for (uint32_t *prev_sample = sample_memory;
+             prev_sample < end_sample;
+             prev_sample += params.next_sample_stride){
+            wave2d_mirrored_sample_to_sample_blit(prev_sample, params.apply_mirroring, current_sample, params.window_w, params.window_h);
+            
+            Wave2D_Sample_Check_Result check_result = 
+                wave2d_check_new_sample(params, sample_memory, (uint32_t)(current_count - use_count), current_sample);
+            
+            if (check_result.is_repeat_pattern){
+                ++use_count[check_result.repeat_index];
+            }
+            else{
+                *current_count = 1;
+                current_sample += params.next_sample_stride;
+                ++current_count;
+            }
+        }
+    }
+
     uint32_t total_count = (uint32_t)(current_count - use_count);
     return(total_count);
 }
@@ -1016,7 +1130,10 @@ int main(int argc, char **argv){
     Wave2D_Samples samples = {0};
     
     // sample setup from image
-    Wave2D_Image_Processing_Params img_proc_params = wave2d_image_processing_params(SRC_IMG_W, SRC_IMG_H, 3, 3, 1, 1, 0);
+    uint32_t sample_window_w = 3;
+    uint32_t sample_window_h = 4;
+    
+    Wave2D_Image_Processing_Params img_proc_params = wave2d_image_processing_params(SRC_IMG_W, SRC_IMG_H, sample_window_w, sample_window_h, 1, 1, 1);
     void *img_proc_scratch_memory = malloc(img_proc_params.scratch_size);
     int32_t sample_count = wave2d_extract_samples_from_image(img_proc_params, &test_base_image[0][0], img_proc_scratch_memory);
     
@@ -1026,7 +1143,7 @@ int main(int argc, char **argv){
     int32_t sample_memory_size = sample_count*sizeof(Wave2D_Sample);
     void *sample_memory = malloc(sample_memory_size);
     wave2d_samples_memory(&samples, sample_memory, sample_memory_size);
-    wave2d_begin_samples(&samples, 3, 3);
+    wave2d_begin_samples(&samples, sample_window_w, sample_window_h);
     for (int32_t i = 0; i < sample_count; ++i){
         wave2d_add_sample(&samples, current_sample, (float)(*current_count));
         current_sample += img_proc_params.next_sample_stride;
@@ -1047,7 +1164,10 @@ int main(int argc, char **argv){
     void *state_memory = malloc(state_memory_size);
     wave2d_state_memory(&state, state_memory, state_memory_size);
     
-    wave2d_set_output_size(&state, &samples, 30, 30);
+    Wave2D_Samples *samples_array[2];
+    samples_array[0] = &samples;
+    
+    wave2d_initialize_state(&state, samples_array, 1, 30, 30);
     
     int32_t scratch_memory_size = (1 << 10)*64;
     void *scratch_memory = malloc(scratch_memory_size);
@@ -1058,7 +1178,7 @@ int main(int argc, char **argv){
     for (int32_t i = 0; i < 1; ++i){
         rng.state = 12 + i;
         
-        int32_t result = wave2d_generate_output(&state, &samples, &rng, out, scratch_memory, scratch_memory_size);
+        int32_t result = wave2d_generate_output(&state, &rng, out, scratch_memory, scratch_memory_size);
         
         // SHOW OUTPUT
         if (result){
