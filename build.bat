@@ -5,5 +5,5 @@ SET OPTS=%OPTS% /GR- /EHa- /nologo /FC
 SET DEBUG=/Zi
 
 pushd ..\build
-cl %OPTS% %DEBUG% ..\code\wfc.c /Zi /Fewfc
+cl %OPTS% %DEBUG% ..\code\wfc.c /Fewfc
 popd

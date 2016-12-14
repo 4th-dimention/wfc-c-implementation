@@ -9,7 +9,7 @@
  */
 
 
-#define DEBUGGING 0
+#define DEBUGGING 4
 
 
 #include <stdint.h>
@@ -21,6 +21,48 @@
 #if defined(DEBUGGING)
 #include <stdio.h>
 #include <stdlib.h>
+#endif
+
+typedef uint64_t TIME;
+typedef struct{
+    TIME start;
+    TIME total;
+    uint64_t start_count;
+    uint64_t end_count;
+} TIME_COUNTER;
+
+static TIME_COUNTER null_time_counter = {0};
+#define MAKE_TIME_COUNTER() (null_time_counter)
+
+#if defined(DEBUGGING) && (DEBUGGING == 4)
+# include <intrin.h>
+# define BEGIN_TIME() (__rdtsc())
+# define END_TIME_MESSAGE(s,m) do { TIME t = __rdtsc() - s; printf("%20s: %12lu\n", m, t); } while(0)
+# define END_TIME(s) END_TIME_MESSAGE(s,#s)
+
+# define BEGIN_TIME_COUNTER(c) (c)->start_count++; (c)->start = __rdtsc()
+# define END_TIME_COUNTER(c) (c)->end_count++; (c)->total += (__rdtsc() - (c)->start)
+# define DISPLAY_TIME_COUNTER_MESSAGE(c,m) do {            \
+    if ((c)->start_count == (c)->end_count)                \
+    printf("%20s: %12lu\n%44s: %10lu\n%44s: %10lu\n",      \
+    m, (c)->total,                                  \
+    "average", (c)->total / (c)->start_count,       \
+     "count", (c)->start_count);                     \
+    else printf("%30s: COUNT MISMATCH ERROR %lu vs %lu\n", \
+    m, (c)->start_count, (c)->end_count);      \
+} while(0)
+# define DISPLAY_TIME_COUNTER(c) DISPLAY_TIME_COUNTER_MESSAGE(c,#c)
+
+#else
+
+# define BEGIN_TIME() (0)
+# define END_TIME_MESSAGE(s,m)
+# define END_TIME(s)
+
+# define BEGIN_TIME_COUNTER(c)
+# define END_TIME_COUNTER(c)
+# define DISPLAY_TIME_COUNTER_MESSAGE(c,m)
+# define DISPLAY_TIME_COUNTER(c)
 #endif
 
 // RANDOM
@@ -161,8 +203,7 @@ typedef struct Wave2D_State{
     float log_T;
     float *weight_by_log_weight;
     
-    Wave2D_Samples **sample_arrays;
-    uint32_t sample_array_count;
+    Wave2D_Samples *samples;
 } Wave2D_State;
 
 static void
@@ -171,22 +212,17 @@ wave2d_state_memory(Wave2D_State *state, void *memory, int32_t size){
 }
 
 static void
-wave2d_initialize_state(Wave2D_State *state, Wave2D_Samples **sample_arrays, uint32_t sample_array_count, uint32_t output_w, uint32_t output_h){
+wave2d_initialize_state(Wave2D_State *state, Wave2D_Samples *samples, uint32_t output_w, uint32_t output_h){
     uint32_t grid_cell_count = output_w*output_h;
     
-    uint32_t sample_count = 0;
-    for (uint32_t i = 0; i < sample_array_count; ++i){
-        sample_count += sample_arrays[i]->sample_count;
-    }
-    
+    uint32_t sample_count = samples->sample_count;
     uint32_t coefficient_count = grid_cell_count * sample_count;
     
     state->output_w = output_w;
     state->output_h = output_h;
     state->sample_count = sample_count;
     state->coefficient_count = coefficient_count;
-    state->sample_arrays = sample_arrays;
-    state->sample_array_count = sample_array_count;
+    state->samples = samples;
     
     part_clear(&state->part);
     state->coefficients = push_array(&state->part, uint8_t, coefficient_count);
@@ -197,16 +233,15 @@ wave2d_initialize_state(Wave2D_State *state, Wave2D_Samples **sample_arrays, uin
     float *weight_by_log_weight = state->weight_by_log_weight;
     int32_t stride = sizeof(Wave2D_Sample);
     
-    for (uint32_t i = 0; i < sample_array_count; ++i){
-        float *weight_ptr = &sample_arrays[i]->samples[0].weight;
-        uint32_t local_sample_count = sample_arrays[i]->sample_count;
+        float *weight_ptr = &samples->samples[0].weight;
+    uint32_t local_sample_count = samples->sample_count;
         for (uint32_t j = 0; j < local_sample_count; ++j){
             *weight_by_log_weight = (*weight_ptr) * logf(*weight_ptr);
             ++weight_by_log_weight;
             weight_ptr = (float*)((uint8_t*)weight_ptr + stride);
         }
     }
-}
+
 typedef struct Wave2D_Change{
     uint32_t x, y;
 } Wave2D_Change;
@@ -281,6 +316,12 @@ wave2d_get_debug_output(uint32_t *map, uint32_t w, uint32_t h, uint8_t *cell_fin
 
 static int32_t
 wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *scratch, int32_t scratch_size){
+#if defined(DEBUGGING) && (DEBUGGING == 4)
+    TIME_COUNTER observation = MAKE_TIME_COUNTER();
+    TIME_COUNTER propogation = MAKE_TIME_COUNTER();
+    TIME_COUNTER single_change = MAKE_TIME_COUNTER();
+    #endif
+    
     int32_t result = 0;
     
     uint32_t coefficient_count = state->coefficient_count;
@@ -290,8 +331,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     uint32_t cell_count = output_w*output_h;
     uint32_t sample_count = state->sample_count;
     
-    // TODO(allen): Generalize this procedure to multiple sample arrays
-    Wave2D_Samples *samples = state->sample_arrays[0];
+    Wave2D_Samples *samples = state->samples;
     
     uint32_t sample_w = samples->w;
     uint32_t sample_h = samples->h;
@@ -330,6 +370,8 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     for (int32_t step = 0; ; ++step){
         // OBSERVE
         //  find smallest entropy
+        
+        BEGIN_TIME_COUNTER(&observation);
         
         uint32_t best_x = output_w;
         uint32_t best_y = output_h;
@@ -395,6 +437,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
         }
         
         if (best_x == output_w && best_y == output_h){
+            END_TIME_COUNTER(&observation);
             goto finished;
         }
         
@@ -441,8 +484,12 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
             }
         }
         
+        END_TIME_COUNTER(&observation);
+        BEGIN_TIME_COUNTER(&propogation);
+        
         // PROPOGATE
         for (int32_t i = 0; i < change_count; ++i){
+            BEGIN_TIME_COUNTER(&single_change);
             Wave2D_Change change = changes[i];
             
             int32_t delta_x = 0, delta_y = 0;
@@ -519,7 +566,6 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                                     goto finished;
                                 }
                                 
-                                // TODO(allen): check for a newly finished cell / contradictions
                                 cell2[t2] = 0;
                                 cell_2_changed = 1;
                             }
@@ -556,9 +602,12 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
             }
             
             on_change_queue[change.x + change.y*output_w] = 0;
+            END_TIME_COUNTER(&single_change);
         }
         
         change_count = 0;
+        
+        END_TIME_COUNTER(&propogation);
         
 #if defined(DEBUGGING) && (DEBUGGING == 1)
         for (uint32_t y = 0; y < output_h; ++y){
@@ -604,6 +653,10 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     }
     
     finished:;
+    DISPLAY_TIME_COUNTER(&observation);
+    DISPLAY_TIME_COUNTER(&propogation);
+    DISPLAY_TIME_COUNTER(&single_change);
+    
     if (!failed){
         for (uint32_t x = 0; x < output_w; ++x){
             for (uint32_t y = 0; y < output_h; ++y){
@@ -1126,14 +1179,18 @@ rotation_test(){
 #include <stdio.h>
 #include <stdlib.h>
 int main(int argc, char **argv){
+    // INIT VARS
+#define SAMPLE_WINDOW_W 3
+#define SAMPLE_WINDOW_H 3
+#define OUTPUT_W 30
+#define OUTPUT_H 30
+    
     // SETUP SAMPLES
+    TIME get_samples_time = BEGIN_TIME();
+    
     Wave2D_Samples samples = {0};
     
-    // sample setup from image
-    uint32_t sample_window_w = 3;
-    uint32_t sample_window_h = 4;
-    
-    Wave2D_Image_Processing_Params img_proc_params = wave2d_image_processing_params(SRC_IMG_W, SRC_IMG_H, sample_window_w, sample_window_h, 1, 1, 1);
+    Wave2D_Image_Processing_Params img_proc_params = wave2d_image_processing_params(SRC_IMG_W, SRC_IMG_H, SAMPLE_WINDOW_W, SAMPLE_WINDOW_H, 1, 2, 1);
     void *img_proc_scratch_memory = malloc(img_proc_params.scratch_size);
     int32_t sample_count = wave2d_extract_samples_from_image(img_proc_params, &test_base_image[0][0], img_proc_scratch_memory);
     
@@ -1143,7 +1200,7 @@ int main(int argc, char **argv){
     int32_t sample_memory_size = sample_count*sizeof(Wave2D_Sample);
     void *sample_memory = malloc(sample_memory_size);
     wave2d_samples_memory(&samples, sample_memory, sample_memory_size);
-    wave2d_begin_samples(&samples, sample_window_w, sample_window_h);
+    wave2d_begin_samples(&samples, SAMPLE_WINDOW_W, SAMPLE_WINDOW_H);
     for (int32_t i = 0; i < sample_count; ++i){
         wave2d_add_sample(&samples, current_sample, (float)(*current_count));
         current_sample += img_proc_params.next_sample_stride;
@@ -1151,41 +1208,53 @@ int main(int argc, char **argv){
     }
     wave2d_end_samples(&samples);
     
+    END_TIME(get_samples_time);
+    
 #if defined(DEBUGGING) && (DEBUGGING == 2)
     wave2d_print_samples(samples);
 #endif
     
     // RUN THE WAVE COLLAPSE
+    TIME generator_init_time = BEGIN_TIME();
+    
     Wave2D_State state = {0};
-    uint32_t out[30*30];
+    uint32_t out[OUTPUT_W*OUTPUT_H];
     memset(out, 0, sizeof(out));
     
     int32_t state_memory_size = (1 << 19);
     void *state_memory = malloc(state_memory_size);
     wave2d_state_memory(&state, state_memory, state_memory_size);
     
-    Wave2D_Samples *samples_array[2];
-    samples_array[0] = &samples;
-    
-    wave2d_initialize_state(&state, samples_array, 1, 30, 30);
+    wave2d_initialize_state(&state, &samples, OUTPUT_W, OUTPUT_H);
     
     int32_t scratch_memory_size = (1 << 10)*64;
     void *scratch_memory = malloc(scratch_memory_size);
     
+    END_TIME(generator_init_time);
+    
     Random rng = {0};
     rng.inc = 17;
+    
+    int32_t print_result = 1;
+    
+#if defined(DEBUGGING) && (DEBUGGING == 4)
+    print_result = 0;
+    #endif
     
     for (int32_t i = 0; i < 1; ++i){
         rng.state = 12 + i;
         
+        TIME generator_run_time = BEGIN_TIME();
         int32_t result = wave2d_generate_output(&state, &rng, out, scratch_memory, scratch_memory_size);
+        END_TIME(generator_run_time);
         
         // SHOW OUTPUT
+        if (print_result){
         if (result){
             uint32_t *line = &out[0];
-            for (int32_t y = 0; y < 30; ++y){
+            for (int32_t y = 0; y < OUTPUT_H; ++y){
                 uint32_t *src = line;
-                for (int32_t x = 0; x < 30; ++x){
+                for (int32_t x = 0; x < OUTPUT_W; ++x){
                     printf("%u", *src);
                     src += 1;
                 }
@@ -1198,7 +1267,8 @@ int main(int argc, char **argv){
             printf("FAILED\n\n");
         }
     }
-    
+}
+
     return(0);
 }
 
