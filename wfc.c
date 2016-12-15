@@ -36,7 +36,7 @@ static TIME_COUNTER null_time_counter = {0};
 
 #if defined(DEBUGGING) && (DEBUGGING == 4)
 # include <intrin.h>
-# define BEGIN_TIME() (__rdtsc())
+# define BEGIN_TIME(v) TIME v = (__rdtsc())
 # define END_TIME_MESSAGE(s,m) do { TIME t = __rdtsc() - s; printf("%20s: %12lu\n", m, t); } while(0)
 # define END_TIME(s) END_TIME_MESSAGE(s,#s)
 
@@ -55,7 +55,7 @@ static TIME_COUNTER null_time_counter = {0};
 
 #else
 
-# define BEGIN_TIME() (0)
+# define BEGIN_TIME(v)
 # define END_TIME_MESSAGE(s,m)
 # define END_TIME(s)
 
@@ -197,10 +197,10 @@ typedef struct Wave2D_State{
     
     uint32_t output_w, output_h;
     uint32_t sample_count;
-    uint32_t coefficient_count;
-    uint8_t *coefficients;
+    uint32_t *feasible_states;
     
     float log_T;
+    float total_weight;
     float *weight_by_log_weight;
     
     Wave2D_Samples *samples;
@@ -214,32 +214,31 @@ wave2d_state_memory(Wave2D_State *state, void *memory, int32_t size){
 static void
 wave2d_initialize_state(Wave2D_State *state, Wave2D_Samples *samples, uint32_t output_w, uint32_t output_h){
     uint32_t grid_cell_count = output_w*output_h;
-    
     uint32_t sample_count = samples->sample_count;
-    uint32_t coefficient_count = grid_cell_count * sample_count;
+    uint32_t feasible_state_count = grid_cell_count * (sample_count + 1);
     
     state->output_w = output_w;
     state->output_h = output_h;
     state->sample_count = sample_count;
-    state->coefficient_count = coefficient_count;
     state->samples = samples;
     
     part_clear(&state->part);
-    state->coefficients = push_array(&state->part, uint8_t, coefficient_count);
+    state->feasible_states = push_array(&state->part, uint32_t, feasible_state_count);
     
     state->log_T = logf((float)sample_count);
     state->weight_by_log_weight = push_array(&state->part, float, sample_count);
     
     float *weight_by_log_weight = state->weight_by_log_weight;
-    int32_t stride = sizeof(Wave2D_Sample);
-    
+    float total_weight = 0.f;
         float *weight_ptr = &samples->samples[0].weight;
-    uint32_t local_sample_count = samples->sample_count;
-        for (uint32_t j = 0; j < local_sample_count; ++j){
-            *weight_by_log_weight = (*weight_ptr) * logf(*weight_ptr);
-            ++weight_by_log_weight;
+    int32_t stride = sizeof(Wave2D_Sample);
+        for (uint32_t j = 0; j < sample_count; ++j){
+            *(weight_by_log_weight++) = (*weight_ptr) * logf(*weight_ptr);
+            total_weight += *weight_ptr;
             weight_ptr = (float*)((uint8_t*)weight_ptr + stride);
         }
+        
+        state->total_weight = total_weight;
     }
 
 typedef struct Wave2D_Change{
@@ -289,16 +288,14 @@ typedef struct Wave2D_Failure_Info{
 
 #if defined(DEBUGGING) && (DEBUGGING != 0)
 static void
-wave2d_get_debug_output(uint32_t *map, uint32_t w, uint32_t h, uint8_t *cell_finished, uint8_t *coefficients, uint32_t sample_count, Wave2D_Samples *samples){
+wave2d_get_debug_output(uint32_t *map, uint32_t w, uint32_t h, uint8_t *cell_finished, uint32_t *feasible_states, uint32_t sample_count, Wave2D_Samples *samples){
     memset(map, 0xFF, 4*w*h);
     for (uint32_t y = 0; y < h; ++y){
         for (uint32_t x = 0; x < w; ++x){
-            if (cell_finished[x + y*w]){
-                uint8_t *cell = &coefficients[(x + y*w)*sample_count];
-                uint32_t t = 0;
-                for (; t < sample_count; ++t){
-                    if (cell[t]) break;
-                }
+            uint32_t *cell_base = &feasible_states[(x + y*w)*(sample_count+1)];
+            if (*cell_base == 1){
+                uint32_t *cell = cell_base + 1;
+                uint32_t t = cell[0];
                 
                 uint32_t *sample = samples->samples[t].data;
                 for (uint32_t yy = 0; yy < samples->h; ++yy){
@@ -324,8 +321,6 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     
     int32_t result = 0;
     
-    uint32_t coefficient_count = state->coefficient_count;
-    
     uint32_t output_w = state->output_w;
     uint32_t output_h = state->output_h;
     uint32_t cell_count = output_w*output_h;
@@ -336,7 +331,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     uint32_t sample_w = samples->w;
     uint32_t sample_h = samples->h;
     
-    uint8_t *coefficients = state->coefficients;
+    uint32_t *feasible_states = state->feasible_states;
     float *weight_by_log_weight = state->weight_by_log_weight;
     
     uint8_t *scratch_start = scratch;
@@ -360,8 +355,13 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     int32_t change_count = 0;
     
     // CLEAR
-    for (uint32_t i = 0; i < coefficient_count; ++i){
-        coefficients[i] = 1;
+    uint32_t *feasible_state_ptr = feasible_states;
+    uint32_t cell_stride = sample_count + 1;
+    for (uint32_t i = 0; i < cell_count; ++i){
+        *(feasible_state_ptr++) = sample_count;
+        for (uint32_t j = 0; j < sample_count; ++j){
+            *(feasible_state_ptr++) = j;
+        }
     }
     
     // COLLAPSE
@@ -382,21 +382,13 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
             for (uint32_t y = 0; y < output_h; ++y){
                 
                 if (!cell_finished[(x + y*output_w)]){
-                    uint8_t *cell_coefficients = &coefficients[(x + y*output_w) * sample_count];
+                    uint32_t *cell_feasible_states_base = &feasible_states[(x + y*output_w) * cell_stride];
+                    uint32_t *cell_feasible_states = cell_feasible_states_base+1;
+                    uint32_t *cell_feasible_count = cell_feasible_states_base;
                     
-                    uint32_t valid_sample_count = 0;
+                    uint32_t valid_sample_count = *cell_feasible_count;
                     float total_weight = 0.f;
-                    float entropy = 0;
-                    
-                    float *weight_ptr = &samples->samples[0].weight;
-                    int32_t stride = sizeof(Wave2D_Sample);
-                    for (uint32_t t = 0; t < sample_count; ++t){
-                        if (cell_coefficients[t]){
-                            ++valid_sample_count;
-                            total_weight += *weight_ptr;
-                        }
-                        weight_ptr = (float*)((uint8_t*)weight_ptr + stride);
-                    }
+                    float entropy = 0.f;
                     
                     // TODO(allen): Is it really faster this way?
                     // I guess the point is to avoid too many array lookups
@@ -410,15 +402,21 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                     }
                     else if (valid_sample_count == sample_count){
                         entropy = state->log_T;
+                        total_weight = state->total_weight;
                     }
                     else{
-                        float entropy_sum = 0;
-                        float log_total_weight = logf(total_weight);
-                        for (uint32_t t = 0; t < sample_count; ++t){
-                            if (cell_coefficients[t]){
-                                entropy_sum += weight_by_log_weight[t];
-                            }
+                        for (uint32_t t_i = 0; t_i < valid_sample_count; ++t_i){
+                            uint32_t t = cell_feasible_states[t_i];
+                            total_weight += samples->samples[t].weight;
                         }
+                        
+                        float entropy_sum = 0;
+                        for (uint32_t t_i = 0; t_i < valid_sample_count; ++t_i){
+                            uint32_t t = cell_feasible_states[t_i];
+                                entropy_sum += weight_by_log_weight[t];
+                        }
+                        
+                        float log_total_weight = logf(total_weight);
                         entropy = log_total_weight - entropy_sum/total_weight;
                     }
                     
@@ -444,21 +442,20 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
         // randomly choose a value for the cell with lowest entropy
         cell_finished[(best_x + best_y*output_w)] = 1;
         
-        uint8_t *cell_coefficients = &coefficients[(best_x + best_y*output_w) * sample_count];
+        uint32_t *cell_feasible_states_base = &feasible_states[(best_x + best_y*output_w) * cell_stride];
+        uint32_t *cell_feasible_states = cell_feasible_states_base+1;
+        uint32_t valid_sample_count = *cell_feasible_states_base;
         
         float die_roll = best_total_weight * pcg32_random_float_01(rng);
         
-        float *weight_ptr = &samples->samples[0].weight;
-        int32_t stride = sizeof(Wave2D_Sample);
         uint32_t hit_element = sample_count;
-        for (uint32_t t = 0; t < sample_count; ++t){
-            die_roll -= (*weight_ptr)*cell_coefficients[t];
+        for (uint32_t t_i = 0; t_i < valid_sample_count; ++t_i){
+            uint32_t t = cell_feasible_states[t_i];
+            die_roll -= samples->samples[t].weight;
             if (die_roll < 0){
                 hit_element = t;
                 break;
             }
-            
-            weight_ptr = (float*)((uint8_t*)weight_ptr + stride);
         }
         
         if (hit_element == sample_count){
@@ -467,9 +464,8 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
             goto finished;
         }
         
-        for (uint32_t t = 0; t < sample_count; ++t){
-            cell_coefficients[t] = (t == hit_element);
-        }
+        *cell_feasible_states_base = 1;
+        cell_feasible_states[0] = hit_element;
         
         {
             Wave2D_Change new_change;
@@ -500,8 +496,8 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                     uint32_t y2 = (uint32_t)((change.y + delta_y + output_h) % output_h);
                     
                     // cell1 changed, now propogate to cell2
-                    uint8_t *cell1 = &coefficients[(change.x + change.y*output_w)*sample_count];
-                    uint8_t *cell2 = &coefficients[(x2 + y2*output_w)*sample_count];
+                    uint32_t *cell1_base = &feasible_states[(change.x + change.y*output_w)*cell_stride];
+                    uint32_t *cell2_base = &feasible_states[(x2 + y2*output_w)*cell_stride];
                     
                     uint32_t cell_2_changed = 0;
                     
@@ -525,15 +521,16 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                     }
                     
                     uint8_t cell2_is_finished = cell_finished[x2 + y2*output_w];
-                    int32_t potential_state_count = 0;
                     
-                    for (uint32_t t2 = 0; t2 < sample_count; ++t2){
-                        // TODO(allen): keep a list of uneliminated sample values for each cell
-                        if (cell2[t2]){
+                    uint32_t *cell1 = cell1_base + 1;
+                    uint32_t *cell2 = cell2_base + 1;
+                    
+                    for (uint32_t t2_i = 0; t2_i < *cell2_base; ++t2_i){
+                        uint32_t t2 = cell2[t2_i];
+                        
                             uint32_t can_coexist = 0;
-                            for (uint32_t t1 = 0; t1 < sample_count; ++t1){
-                                // TODO(allen): keep a list of uneliminated sample values for each cell
-                                if (cell1[t1]){
+                        for (uint32_t t1_i = 0; t1_i < *cell1_base; ++t1_i){
+                                uint32_t t1 = cell1[t1_i];
                                     uint32_t coexist_check_result = 1;
                                     
                                     // COEXIST CHECK
@@ -554,7 +551,6 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                                         can_coexist = 1;
                                         break;
                                     }
-                                }
                             }
                             
                             if (!can_coexist){
@@ -566,16 +562,15 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                                     goto finished;
                                 }
                                 
-                                cell2[t2] = 0;
+                                --(*cell2_base);
+                                cell2[t2_i] = cell2[(*cell2_base)];
+                                --t2_i;
+                                
                                 cell_2_changed = 1;
                             }
-                            else{
-                                ++potential_state_count;
-                            }
-                        }
                     }
                     
-                    if (!cell2_is_finished && potential_state_count == 1){
+                    if (!cell2_is_finished && *cell2_base == 1){
                         cell_finished[x2 + y2*output_w] = 1;
                     }
                     
@@ -632,7 +627,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
 #if defined(DEBUGGING) && (DEBUGGING == 3)
         {
             uint32_t *map = (uint32_t*)malloc(4*output_w*output_h);
-            wave2d_get_debug_output(map, output_w, output_h, cell_finished, coefficients, sample_count, samples);
+            wave2d_get_debug_output(map, output_w, output_h, cell_finished, feasible_states, sample_count, samples);
             
         for (uint32_t y = 0; y < output_h; ++y){
             for (uint32_t x = 0; x < output_w; ++x){
@@ -660,12 +655,9 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     if (!failed){
         for (uint32_t x = 0; x < output_w; ++x){
             for (uint32_t y = 0; y < output_h; ++y){
-                uint8_t *cell = &coefficients[(x + y*output_w)*sample_count];
-                uint32_t t = 0;
-                for (; t < sample_count; ++t){
-                    if (cell[t]) break;
-                }
-                
+                uint32_t *cell_base = &feasible_states[(x + y*output_w)*cell_stride];
+                uint32_t *cell = cell_base + 1;
+                uint32_t t = cell[0];
                 uint32_t *sample = samples->samples[t].data;
                 out[x + y*output_w] = sample[0];
             }
@@ -695,7 +687,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                 printf("Reached a contradictive state at some tile on the board.\n");
                 
                 uint32_t *map = (uint32_t*)malloc(4*output_w*output_h);
-                wave2d_get_debug_output(map, output_w, output_h, cell_finished, coefficients, sample_count, samples);
+                wave2d_get_debug_output(map, output_w, output_h, cell_finished, feasible_states, sample_count, samples);
                 
                 for (uint32_t y = 0; y < sample_h; ++y){
                     for (uint32_t x = 0; x < sample_w; ++x){
@@ -1186,7 +1178,7 @@ int main(int argc, char **argv){
 #define OUTPUT_H 30
     
     // SETUP SAMPLES
-    TIME get_samples_time = BEGIN_TIME();
+    BEGIN_TIME(get_samples_time);
     
     Wave2D_Samples samples = {0};
     
@@ -1215,7 +1207,7 @@ int main(int argc, char **argv){
 #endif
     
     // RUN THE WAVE COLLAPSE
-    TIME generator_init_time = BEGIN_TIME();
+    BEGIN_TIME(generator_init_time);
     
     Wave2D_State state = {0};
     uint32_t out[OUTPUT_W*OUTPUT_H];
@@ -1241,10 +1233,10 @@ int main(int argc, char **argv){
     print_result = 0;
     #endif
     
-    for (int32_t i = 0; i < 1; ++i){
+    for (int32_t i = 0; i < 10; ++i){
         rng.state = 12 + i;
         
-        TIME generator_run_time = BEGIN_TIME();
+        BEGIN_TIME(generator_run_time);
         int32_t result = wave2d_generate_output(&state, &rng, out, scratch_memory, scratch_memory_size);
         END_TIME(generator_run_time);
         
