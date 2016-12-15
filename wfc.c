@@ -9,7 +9,7 @@
  */
 
 
-#define DEBUGGING 0
+#define DEBUGGING 5
 
 
 #include <stdint.h>
@@ -44,12 +44,14 @@ static TIME_COUNTER null_time_counter = {0};
 #  define BEGIN_TIME_COUNTER(c) (c)->start_count++; (c)->start = __rdtsc()
 #  define END_TIME_COUNTER(c) (c)->end_count++; (c)->total += (__rdtsc() - (c)->start)
 #  define DISPLAY_TIME_COUNTER_MESSAGE(c,m) do {                 \
-    if ((c)->start_count == (c)->end_count)                      \
+    if ((c)->start_count == 0 && (c)->end_count == 0)            \
+    printf("%20s: no hits\n", m);                                \
+    else if ((c)->start_count == (c)->end_count)                 \
     printf("%20s: %12llu\n%44s: %10llu\n%44s: %10llu\n",         \
     m, (c)->total,                                        \
     "average", (c)->total / (c)->start_count,             \
      "count", (c)->start_count);                           \
-    else printf("%30s: COUNT MISMATCH ERROR %llu vs  %llu\n",    \
+    else printf("%20s: COUNT MISMATCH ERROR %llu vs  %llu\n",    \
     m, (c)->start_count, (c)->end_count);            \
 } while(0)
 #  define DISPLAY_TIME_COUNTER(c) DISPLAY_TIME_COUNTER_MESSAGE(c,#c)
@@ -394,9 +396,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     TIME_COUNTER single_change = MAKE_TIME_COUNTER();
     TIME_COUNTER dxy_preproc = MAKE_TIME_COUNTER();
     TIME_COUNTER full_check = MAKE_TIME_COUNTER();
-    TIME_COUNTER coexist_check = MAKE_TIME_COUNTER();
     TIME_COUNTER add_change = MAKE_TIME_COUNTER();
-    TIME_COUNTER update_out_grid = MAKE_TIME_COUNTER();
     #endif
     
     int32_t result = 0;
@@ -602,17 +602,14 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                         
                             uint32_t can_coexist = 0;
                         for (uint32_t t1_i = 0; t1_i < *cell1_base; ++t1_i){
-                            BEGIN_TIME_COUNTER(&coexist_check);
                                 uint32_t t1 = cell1[t1_i];
                             
                             uint32_t coexist_check_result = coex_sub_table[t1 + t2*sample_count];
                             
                                     if (coexist_check_result){
                                         can_coexist = 1;
-                                        END_TIME_COUNTER(&coexist_check);
                                         break;
                                     }
-                                    END_TIME_COUNTER(&coexist_check);
                             }
                             
                             if (!can_coexist){
@@ -714,9 +711,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     DISPLAY_TIME_COUNTER(&single_change);
     DISPLAY_TIME_COUNTER(&dxy_preproc);
     DISPLAY_TIME_COUNTER(&full_check);
-    DISPLAY_TIME_COUNTER(&coexist_check);
     DISPLAY_TIME_COUNTER(&add_change);
-    DISPLAY_TIME_COUNTER(&update_out_grid);
     
     if (!failed){
         for (uint32_t x = 0; x < output_w; ++x){
