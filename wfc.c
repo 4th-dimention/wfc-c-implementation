@@ -311,6 +311,15 @@ wave2d_get_debug_output(uint32_t *map, uint32_t w, uint32_t h, uint8_t *cell_fin
 }
 #endif
 
+static void*
+round_ptr(void *ptr, uint32_t boundary){
+    uint64_t pos = (uint64_t)ptr;
+    --boundary;
+    pos = (pos+boundary)&(~boundary);
+    ptr = (void*)pos;
+    return(ptr);
+}
+
 static int32_t
 wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *scratch, int32_t scratch_size){
 #if defined(DEBUGGING) && (DEBUGGING == 4)
@@ -346,9 +355,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     memset(cell_finished, 0, cell_count);
     scratch_ptr += cell_count;
     
-    int32_t pos = (int32_t)(scratch_ptr - scratch_start);
-    pos = (pos+3)&(~3);
-    scratch_ptr = (uint8_t*)(scratch) + pos;
+    scratch_ptr = round_ptr(scratch_ptr, 4);
     
     Wave2D_Change *changes = (Wave2D_Change*)scratch_ptr;
     int32_t change_max = (int32_t)(scratch_end - scratch_ptr)/sizeof(Wave2D_Change);
