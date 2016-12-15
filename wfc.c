@@ -256,18 +256,14 @@ enum Wave2D_Add_Change_Result{
     AddChange_Success_Already_On_Queue,
 };
 
-#define ON_CHANGE_QUEUE_MASK 0x01
-#define ON_COMPLETION_QUEUE_MASK 0x02
-
 static int32_t
 wave2d_add_change(Wave2D_Change change, Wave2D_Change *changes, int32_t *change_count, int32_t change_max, uint8_t *on_change_queue, uint32_t w){
     int32_t result = AddChange_Failed;
     uint32_t i = change.x + change.y*w;
-    if ((on_change_queue[i] & ON_CHANGE_QUEUE_MASK) == 0){
+    if (on_change_queue[i] == 0){
         if (*change_count < change_max){
             result = AddChange_Success;
             changes[(*change_count)++] = change;
-            on_change_queue[i] |= ON_CHANGE_QUEUE_MASK;
         }
     }
     else{
@@ -338,7 +334,6 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     TIME_COUNTER full_check = MAKE_TIME_COUNTER();
     TIME_COUNTER coexist_check = MAKE_TIME_COUNTER();
     TIME_COUNTER add_change = MAKE_TIME_COUNTER();
-    TIME_COUNTER update_out_grid = MAKE_TIME_COUNTER();
     #endif
     
     int32_t result = 0;
@@ -369,16 +364,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     memset(cell_finished, 0, cell_count);
     scratch_ptr += cell_count;
     
-    uint8_t *out_finished = (uint8_t*)scratch_ptr;
-    memset(out_finished, 0, cell_count);
-    scratch_ptr += cell_count;
-    
     scratch_ptr = round_ptr(scratch_ptr, 4);
-    
-    Wave2D_Change *changed_to_completion = (Wave2D_Change*)scratch_ptr;
-    memset(changed_to_completion, 0, sizeof(Wave2D_Change)*cell_count);
-    uint32_t completion_count = 0;
-    scratch_ptr += sizeof(Wave2D_Change)*cell_count;
     
     Wave2D_Change *changes = (Wave2D_Change*)scratch_ptr;
     memset(changes, 0, sizeof(Wave2D_Change)*cell_count);
@@ -529,11 +515,6 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
             uint32_t *cell1_base = &feasible_states[(change.x + change.y*output_w)*cell_stride];
             uint32_t *cell1 = cell1_base + 1;
             
-            if (*cell1_base == 1 && (on_change_queue[change.x + change.y*output_w]&ON_COMPLETION_QUEUE_MASK) == 0){
-                changed_to_completion[completion_count++] = change;
-                on_change_queue[change.x + change.y*output_w] |= ON_COMPLETION_QUEUE_MASK;
-            }
-            
             for (int32_t delta_x = -(int32_t)(sample_w) + 1; delta_x < (int32_t)(sample_w); ++delta_x){
                 for (int32_t delta_y = -(int32_t)(sample_h) + 1; delta_y < (int32_t)(sample_h); ++delta_y){
                     BEGIN_TIME_COUNTER(&dxy_preproc);
@@ -544,22 +525,6 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                     
                     uint32_t x2 = (uint32_t)((change.x + delta_x + output_w) % output_w);
                     uint32_t y2 = (uint32_t)((change.y + delta_y + output_h) % output_h);
-                    
-                    int32_t skip_spot = 1;
-                    for (uint32_t sx = x2; sx < x2 + sample_w; ++sx){
-                        for (uint32_t sy = y2; sy < y2 + sample_h; ++sy){
-                            uint32_t ox = sx % output_w;
-                            uint32_t oy = sy % output_h;
-                            if (out_finished[ox + oy*output_w] == 0){
-                                skip_spot = 0;
-                                break;
-                            }
-                        }
-                    }
-                    if (skip_spot){
-                        END_TIME_COUNTER(&dxy_preproc);
-                        continue;
-                    }
                     
                     // cell1 changed, now propogate to cell2
                     int32_t minx = 0, maxx = (int32_t)sample_w;
@@ -668,29 +633,13 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                 }
             }
             
-            on_change_queue[change.x + change.y*output_w] &= ~(ON_CHANGE_QUEUE_MASK);
+            on_change_queue[change.x + change.y*output_w] = 0;
             END_TIME_COUNTER(&single_change);
         }
         
         change_count = 0;
         
         END_TIME_COUNTER(&propogation);
-        
-        BEGIN_TIME_COUNTER(&update_out_grid);
-        for (uint32_t i = 0; i < completion_count; ++i){
-            Wave2D_Change change = changed_to_completion[i];
-            
-            for (uint32_t x = 0; x < sample_w; ++x){
-                for (uint32_t y = 0; y < sample_h; ++y){
-                    uint32_t ox = (x + change.x) % output_w;
-                    uint32_t oy = (y + change.y) % output_h;
-                    out_finished[ox + oy*output_w] = 1;
-                }
-            }
-        }
-        completion_count = 0;
-        
-        END_TIME_COUNTER(&update_out_grid);
         
 #if defined(DEBUGGING) && (DEBUGGING == 1)
         for (uint32_t y = 0; y < output_h; ++y){
