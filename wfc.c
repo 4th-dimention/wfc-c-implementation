@@ -326,6 +326,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     TIME_COUNTER observation = MAKE_TIME_COUNTER();
     TIME_COUNTER propogation = MAKE_TIME_COUNTER();
     TIME_COUNTER single_change = MAKE_TIME_COUNTER();
+    TIME_COUNTER coexist_check = MAKE_TIME_COUNTER();
     #endif
     
     int32_t result = 0;
@@ -355,11 +356,21 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     memset(cell_finished, 0, cell_count);
     scratch_ptr += cell_count;
     
+    uint8_t *out_finished = (uint8_t*)scratch_ptr;
+    memset(out_finished, 0, cell_count);
+    scratch_ptr += cell_count;
+    
     scratch_ptr = round_ptr(scratch_ptr, 4);
     
     Wave2D_Change *changes = (Wave2D_Change*)scratch_ptr;
     int32_t change_max = (int32_t)(scratch_end - scratch_ptr)/sizeof(Wave2D_Change);
     int32_t change_count = 0;
+    
+#if defined(DEBUGGING) && (DEBUGGING != 0)
+    if (scratch_ptr > scratch_end){
+        *(int*)0 = 0xA11E;
+    }
+    #endif
     
     // CLEAR
     uint32_t *feasible_state_ptr = feasible_states;
@@ -495,14 +506,27 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
             BEGIN_TIME_COUNTER(&single_change);
             Wave2D_Change change = changes[i];
             
-            int32_t delta_x = 0, delta_y = 0;
-            
-            for (delta_x = -(int32_t)(sample_w) + 1; delta_x < (int32_t)(sample_w); ++delta_x){
-                for (delta_y = -(int32_t)(sample_h) + 1; delta_y < (int32_t)(sample_h); ++delta_y){
+            for (int32_t delta_x = -(int32_t)(sample_w) + 1; delta_x < (int32_t)(sample_w); ++delta_x){
+                for (int32_t delta_y = -(int32_t)(sample_h) + 1; delta_y < (int32_t)(sample_h); ++delta_y){
                     if (delta_x == 0 && delta_y == 0) continue;
                     
                     uint32_t x2 = (uint32_t)((change.x + delta_x + output_w) % output_w);
                     uint32_t y2 = (uint32_t)((change.y + delta_y + output_h) % output_h);
+                    
+#if 0
+                    int32_t skip_spot = 1;
+                    for (uint32_t sx = x2; sx < x2 + sample_w; ++sx){
+                        for (uint32_t sy = y2; sy < y2 + sample_h; ++sy){
+                            uint32_t ox = sx % output_w;
+                            uint32_t oy = sy % output_h;
+                            if (out_finished[ox + oy*output_w] == 0){
+                                skip_spot = 0;
+                                break;
+                            }
+                        }
+                    }
+                    if (skip_spot) continue;
+#endif
                     
                     // cell1 changed, now propogate to cell2
                     uint32_t *cell1_base = &feasible_states[(change.x + change.y*output_w)*cell_stride];
@@ -542,6 +566,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                                 uint32_t t1 = cell1[t1_i];
                                     uint32_t coexist_check_result = 1;
                                     
+                            BEGIN_TIME_COUNTER(&coexist_check);
                                     // COEXIST CHECK
                                     uint32_t *sample_1 = samples->samples[t1].data;
                                     uint32_t *sample_2 = samples->samples[t2].data;
@@ -555,6 +580,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
                                         }
                                     }
                                     finish_coexist_check:;
+                                    END_TIME_COUNTER(&coexist_check);
                                     
                                     if (coexist_check_result){
                                         can_coexist = 1;
@@ -660,6 +686,7 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
     DISPLAY_TIME_COUNTER(&observation);
     DISPLAY_TIME_COUNTER(&propogation);
     DISPLAY_TIME_COUNTER(&single_change);
+    DISPLAY_TIME_COUNTER(&coexist_check);
     
     if (!failed){
         for (uint32_t x = 0; x < output_w; ++x){
