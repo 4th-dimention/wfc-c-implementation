@@ -37,19 +37,19 @@ static TIME_COUNTER null_time_counter = {0};
 #if defined(DEBUGGING) && (DEBUGGING == 4)
 # include <intrin.h>
 # define BEGIN_TIME(v) TIME v = (__rdtsc())
-# define END_TIME_MESSAGE(s,m) do { TIME t = __rdtsc() - s; printf("%20s: %12lu\n", m, t); } while(0)
+# define END_TIME_MESSAGE(s,m) do { TIME t = __rdtsc() - s; printf("%20s: %12llu\n", m, t); } while(0)
 # define END_TIME(s) END_TIME_MESSAGE(s,#s)
 
 # define BEGIN_TIME_COUNTER(c) (c)->start_count++; (c)->start = __rdtsc()
 # define END_TIME_COUNTER(c) (c)->end_count++; (c)->total += (__rdtsc() - (c)->start)
-# define DISPLAY_TIME_COUNTER_MESSAGE(c,m) do {            \
-    if ((c)->start_count == (c)->end_count)                \
-    printf("%20s: %12lu\n%44s: %10lu\n%44s: %10lu\n",      \
-    m, (c)->total,                                  \
-    "average", (c)->total / (c)->start_count,       \
-     "count", (c)->start_count);                     \
-    else printf("%30s: COUNT MISMATCH ERROR %lu vs %lu\n", \
-    m, (c)->start_count, (c)->end_count);      \
+# define DISPLAY_TIME_COUNTER_MESSAGE(c,m) do {                 \
+    if ((c)->start_count == (c)->end_count)                     \
+    printf("%20s: %12llu\n%44s: %10llu\n%44s: %10llu\n",         \
+    m, (c)->total,                                        \
+    "average", (c)->total / (c)->start_count,             \
+     "count", (c)->start_count);                           \
+    else printf("%30s: COUNT MISMATCH ERROR %llu vs  %llu\n",    \
+    m, (c)->start_count, (c)->end_count);            \
 } while(0)
 # define DISPLAY_TIME_COUNTER(c) DISPLAY_TIME_COUNTER_MESSAGE(c,#c)
 
@@ -492,6 +492,8 @@ wave2d_generate_output(Wave2D_State *state, Random *rng, uint32_t *out, void *sc
             
             for (delta_x = -(int32_t)(sample_w) + 1; delta_x < (int32_t)(sample_w); ++delta_x){
                 for (delta_y = -(int32_t)(sample_h) + 1; delta_y < (int32_t)(sample_h); ++delta_y){
+                    if (delta_x == 0 && delta_y == 0) continue;
+                    
                     uint32_t x2 = (uint32_t)((change.x + delta_x + output_w) % output_w);
                     uint32_t y2 = (uint32_t)((change.y + delta_y + output_h) % output_h);
                     
